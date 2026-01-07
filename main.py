@@ -1,18 +1,16 @@
 import sys
-import ctypes  # <--- NEW: Required for Windows Taskbar Icon
+import ctypes  # <--- REQUIRED FOR TASKBAR ICON
 from PyQt5.QtWidgets import QApplication
 from src.ui.main_window import MainWindow
-
-# Import the theme manager
 from src.ui.styles import apply_modern_theme
 
 def main():
-    # --- [NEW] WINDOWS TASKBAR ICON FIX ---
-    # This tells Windows: "I am a standalone app, not just Python"
+    # --- WINDOWS TASKBAR ICON FIX ---
+    # This ID string forces Windows to treat this as a standalone app
     if sys.platform == 'win32':
-        myappid = 'pcb.bom.segregator.v2' # Unique string
+        myappid = 'company.bom.segregator.v2' 
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
-    # --------------------------------------
+    # --------------------------------
 
     app = QApplication(sys.argv)
     

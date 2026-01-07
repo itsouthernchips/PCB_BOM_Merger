@@ -1,0 +1,24 @@
+# --- PyInstaller Generation Folders (CRITICAL) ---
+dist/
+build/
+tests/
+*.spec
+
+# --- Python System Files ---
+__pycache__/
+*.pyc
+
+# --- Virtual Environments ---
+venv/
+env/
+.venv/
+
+# --- IDE Settings (VS Code / PyCharm) ---
+.vscode/
+.idea/
+
+BOM_Segregator_Setup.exe
+installer_script.iss
+
+# --- Mac OS System Files (If you collaborate with Mac users) ---
+.DS_Store

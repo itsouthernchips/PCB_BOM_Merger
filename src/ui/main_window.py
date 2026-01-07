@@ -5,34 +5,41 @@ from PyQt5.QtGui import QIcon
 import os
 import sys
 
+# Screens & Logic
 from src.ui.screens.screen_import import ImportScreen
 from src.ui.screens.screen_mapping import MappingScreen
 from src.ui.screens.screen_dashboard import DashboardScreen
 from src.core.excel_writer import generate_production_files
 from src.core.logic_engine import perform_merge_v2
 
+# --- [CRITICAL FIX] ASSET PATH HELPER ---
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, relative_path)
-
+    if hasattr(sys, '_MEIPASS'):
+        # PyInstaller --onefile temp folder
+        return os.path.join(sys._MEIPASS, relative_path)
+    
+    # PyInstaller --onedir OR Normal Python execution
+    return os.path.join(os.path.abspath("."), relative_path)
+# ----------------------------------------
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Centroid-Based BOM Segregator")
+        self.setWindowTitle("BOM Segregator")
         self.resize(1000, 700) 
         
-        # --- SET WINDOW ICON ---
-        if os.path.exists("assets/logo.png"):
-            self.setWindowIcon(QIcon("assets/logo.png"))
-        elif os.path.exists("assets/logo.ico"):
-            self.setWindowIcon(QIcon("assets/logo.ico"))
+        # --- [UPDATED] LOAD ICON SAFELY ---
+        # Use the helper to find the icon wherever the app is installed
+        icon_path = resource_path(os.path.join("assets", "logo.ico"))
+        
+        # If .ico doesn't exist, try .png
+        if not os.path.exists(icon_path):
+             icon_path = resource_path(os.path.join("assets", "logo.png"))
+             
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+        # ----------------------------------
         
         # --- MENU BAR ---
         self.create_menu_bar()
@@ -46,7 +53,7 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.layout.addWidget(self.stack)
         
-        # Initialize Screens (Import is now Index 0)
+        # Initialize Screens
         self.screen_import = ImportScreen()     # Index 0
         self.screen_mapping = MappingScreen()   # Index 1
         self.screen_dashboard = DashboardScreen() # Index 2
@@ -56,21 +63,11 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.screen_dashboard)
         
         # --- CONNECTIONS ---
-        
-        # Import -> Mapping (Manual)
         self.screen_import.next_clicked.connect(self.go_to_mapping)
-        
-        # Import -> Process (Auto-Skip)
         self.screen_import.skip_mapping_clicked.connect(self.handle_auto_process)
-        
-        # Mapping -> Back to Import
         self.screen_mapping.back_clicked.connect(lambda: self.stack.setCurrentIndex(0))
-        # Mapping -> Process
         self.screen_mapping.next_clicked.connect(self.run_process)
-        
-        # Dashboard -> Back to Mapping
         self.screen_dashboard.back_clicked.connect(lambda: self.stack.setCurrentIndex(1))
-        # Dashboard -> Export
         self.screen_dashboard.export_clicked.connect(self.perform_final_export)
 
     def create_menu_bar(self):
@@ -97,26 +94,15 @@ class MainWindow(QMainWindow):
         """)
 
     def reset_app(self):
-        """ Checks if work is in progress, then clears everything """
-        
-        # 1. Determine if we have "unsaved work"
         on_later_screen = self.stack.currentIndex() > 0
         has_files_loaded = (self.screen_import.bom_df is not None) or (self.screen_import.xy_df is not None)
 
         if on_later_screen or has_files_loaded:
-            reply = QMessageBox.question(
-                self, 
-                'Reset Project?', 
-                "This will clear all loaded files and progress.", 
-                QMessageBox.Yes | QMessageBox.No, 
-                QMessageBox.No
-            )
-            
+            reply = QMessageBox.question(self, 'Reset Project?', "This will clear all loaded files.", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if reply == QMessageBox.Yes:
                 self.screen_import.reset_state()
                 self.stack.setCurrentIndex(0)
         else:
-            # If nothing is loaded, just silently ensure we are reset
             self.screen_import.reset_state()
             self.stack.setCurrentIndex(0)
 
@@ -165,23 +151,11 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Export Error", f"Failed to write file:\n{str(e)}")
 
-    # --- EXIT CONFIRMATION ---
     def closeEvent(self, event):
-        """ Intercepts the close signal to check for unsaved work """
         has_files = (self.screen_import.bom_df is not None) or (self.screen_import.xy_df is not None)
-        
         if has_files:
-            reply = QMessageBox.question(
-                self, 
-                'Confirm Exit', 
-                "You have loaded files. Are you sure you want to exit?\nAny unsaved progress will be lost.", 
-                QMessageBox.Yes | QMessageBox.No, 
-                QMessageBox.No
-            )
-            
-            if reply == QMessageBox.Yes:
-                event.accept()
-            else:
-                event.ignore()
+            reply = QMessageBox.question(self, 'Confirm Exit', "You have loaded files. Are you sure you want to exit?\nAny unsaved progress will be lost.", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            if reply == QMessageBox.Yes: event.accept()
+            else: event.ignore()
         else:
             event.accept()
