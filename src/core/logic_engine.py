@@ -3,7 +3,7 @@ from src.core.normalizer import normalize_bom_data
 import re
 
 def perform_merge_v2(bom_df, xy_df, mapping):
-    print("\n!!! EXECUTING V3.1 LOGIC (PRESERVE BOM ORDER) !!!")
+    print("\n!!! EXECUTING V5.0 LOGIC (SUFFIX FIX) !!!")
     
     # --- 1. KEY RETRIEVAL ---
     bom_ref_col = mapping.get("BOM Location Col")
@@ -15,6 +15,9 @@ def perform_merge_v2(bom_df, xy_df, mapping):
     ref_x_col = mapping.get("Center-X")
     ref_y_col = mapping.get("Center-Y")
     rot_col   = mapping.get("Rotation")
+    
+    pts_col   = mapping.get("Points")
+    mnt_col   = mapping.get("Mounting Type")
 
     # --- 2. CLEAN UNITS FROM XY DATA ---
     if ref_x_col and ref_x_col in xy_df.columns:
@@ -28,18 +31,17 @@ def perform_merge_v2(bom_df, xy_df, mapping):
     print("Resolving Panels...")
     xy_clean = _resolve_panels_v2(xy_df, xy_ref_col, ref_y_col)
 
-    # --- 4. PRE-PROCESS BOM (WITH ORDER TRACKING) ---
+    # --- 4. PRE-PROCESS BOM ---
     print(f"Normalizing BOM...")
     bom_exploded = normalize_bom_data(bom_df, bom_ref_col, delimiter=',') 
-    
-    # [NEW] Capture the original order index
-    # We assign a number (0, 1, 2...) to every row to remember its position
     bom_exploded['_BOM_ORDER'] = range(len(bom_exploded))
 
     # --- 5. MERGE ---
     bom_exploded['_JOIN_KEY'] = bom_exploded[bom_ref_col].astype(str).str.strip().str.upper()
     xy_clean['_JOIN_KEY'] = xy_clean[xy_ref_col].astype(str).str.strip().str.upper()
 
+    # Suffixes are important here. 
+    # If both files have "Points", they become Points_XY and Points_BOM
     merged_df = pd.merge(xy_clean, bom_exploded, on='_JOIN_KEY', how='outer', indicator=True, suffixes=('_XY', '_BOM'))
 
     # --- 6. BUILD OUTPUT ---
@@ -49,25 +51,52 @@ def perform_merge_v2(bom_df, xy_df, mapping):
         merge_status = row['_merge']
         status = "MATCHED" if merge_status == 'both' else ("XY_ONLY" if merge_status == 'left_only' else "BOM_ONLY")
         
-        # [NEW] Get the Order Index (Default to 999999 for XY_ONLY items so they go to the end)
         bom_order = row.get("_BOM_ORDER")
         if pd.isna(bom_order): 
             bom_order = 999999
             
+        # Helper to find data whether it has _BOM suffix or not
+        def _get_merged_val(col_name):
+            if not col_name: return ""
+            # Priority 1: Check exact name (if no collision)
+            if col_name in row and pd.notna(row[col_name]): return row[col_name]
+            # Priority 2: Check _BOM suffix (if collision occurred)
+            col_bom = f"{col_name}_BOM"
+            if col_bom in row and pd.notna(row[col_bom]): return row[col_bom]
+            return ""
+
+        # Retrieve Values safely
+        mnt_val = ""
+        if mnt_col:
+            raw_mnt = str(_get_merged_val(mnt_col)).strip().upper()
+            mnt_val = raw_mnt if raw_mnt != "NAN" else ""
+            
+        pts_val = ""
+        if pts_col:
+            pts_val = str(_get_merged_val(pts_col)).strip()
+            if pts_val.lower() == "nan": pts_val = ""
+
+        part_val = _get_merged_val(mapping.get("Part No."))
+        desc_val = _get_merged_val(mapping.get("Description"))
+        qty_val  = _get_merged_val(mapping.get("Quantity"))
+
         new_row = {
             "Ref Des":     row['_JOIN_KEY'],
             "Status":      status,
             "Is Ignored":  False,
-            "BOM_Order":   bom_order, # Pass this hidden value to the writer
+            "BOM_Order":   bom_order,
             
             "Layer":       row.get(mapping.get("Layer"), ""),
             "Ref X":       row.get(ref_x_col, ""),
             "Ref Y":       row.get(ref_y_col, ""),
             "Rotation":    row.get(rot_col, ""),
             
-            "Part Number": row.get(mapping.get("Part No."), ""),
-            "Description": row.get(mapping.get("Description"), ""),
-            "Quantity":    row.get(mapping.get("Quantity"), "")
+            "Part Number": part_val,
+            "Description": desc_val,
+            "Quantity":    qty_val,
+            
+            "Points":        pts_val,
+            "Mounting Type": mnt_val
         }
         
         ref = str(new_row["Ref Des"])

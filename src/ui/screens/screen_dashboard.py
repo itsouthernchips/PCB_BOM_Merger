@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, 
                              QTableWidgetItem, QLabel, QPushButton, QHeaderView, 
-                             QTabWidget, QAbstractItemView, QMessageBox)
+                             QTabWidget, QAbstractItemView, QMessageBox, QFrame)
 from PyQt5.QtCore import Qt, pyqtSignal
 from PyQt5.QtGui import QFont, QColor
 import pandas as pd
@@ -45,6 +45,7 @@ class DashboardScreen(QWidget):
                 border-top-right-radius: 4px;
                 font-weight: bold;
                 color: #7f8c8d;
+                min-width: 100px;
             }
             QTabBar::tab:selected {
                 background: #BDD7EE; 
@@ -56,21 +57,21 @@ class DashboardScreen(QWidget):
         # Define Tabs
         self.tables = {}
         tab_defs = [
-            ("Internal BOM", "Internal BOM (Grouped)"),
-            ("XY Data", "Master XY Data"),
-            ("BOM Top", "Top Assembly (Grouped)"),
-            ("BOM Bottom", "Bottom Assembly (Grouped)"),
-            ("XY Top", "Top XY (Placement)"),
-            ("XY Bottom", "Bottom XY (Placement)"),
+            ("Internal BOM", "Internal BOM"),
+            ("XY Data", "XY Data"),
+            ("BOM Top", "BOM Top"),
+            ("BOM Bottom", "BOM Bottom"),
+            ("XY Top", "XY Top"),
+            ("XY Bottom", "XY Bottom"),
+            ("Summary", "Summary"),
             ("Exceptions", "Exceptions Report")
         ]
 
         for key, title in tab_defs:
             tab = QWidget()
             t_layout = QVBoxLayout(tab)
-            t_layout.setContentsMargins(5,5,5,5)
+            t_layout.setContentsMargins(0,0,0,0)
             
-            # Create Table (Exceptions is Editable)
             is_editable = (key == "Exceptions")
             table = self._create_table(editable=is_editable)
             
@@ -87,11 +88,11 @@ class DashboardScreen(QWidget):
         footer = QHBoxLayout()
         
         btn_back = QPushButton("<< Adjust Mapping")
-        btn_back.setFixedWidth(150)
+        btn_back.setFixedWidth(180)
         btn_back.clicked.connect(self.back_clicked.emit)
         
         self.btn_refresh = QPushButton("Reprocess Changes")
-        self.btn_refresh.setFixedWidth(160)
+        self.btn_refresh.setFixedWidth(180)
         self.btn_refresh.setCursor(Qt.PointingHandCursor)
         self.btn_refresh.setStyleSheet("color: #d35400; border: 1px solid #d35400;")
         self.btn_refresh.clicked.connect(self.reprocess_data)
@@ -115,6 +116,18 @@ class DashboardScreen(QWidget):
         table.setAlternatingRowColors(True)
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
         table.setSelectionMode(QAbstractItemView.SingleSelection)
+        table.verticalHeader().setVisible(False)
+        
+        table.setStyleSheet("""
+            QTableWidget {
+                gridline-color: #ecf0f1;
+                border: none;
+            }
+            QTableWidget::item {
+                padding-left: 5px;
+                padding-right: 5px;
+            }
+        """)
         
         font = QFont()
         font.setPointSize(10)
@@ -124,7 +137,7 @@ class DashboardScreen(QWidget):
         header.setStyleSheet("""
             QHeaderView::section {
                 background-color: #BDD7EE;
-                color: black;
+                color: #2c3e50;
                 font-weight: bold;
                 border: 1px solid #bdc3c7;
                 padding: 4px;
@@ -146,17 +159,31 @@ class DashboardScreen(QWidget):
         if "_id" not in self.full_df.columns:
             self.full_df["_id"] = range(len(self.full_df))
 
-        # Ensure Remarks column exists for editing
         if "Remarks" not in self.full_df.columns:
             self.full_df["Remarks"] = ""
             
-        # Classify Layers
         if 'Layer' in self.full_df.columns:
             self.full_df['Layer_Classified'] = self.full_df['Layer'].apply(self._classify_layer)
         else:
             self.full_df['Layer_Classified'] = "Unknown"
 
         self.refresh_views()
+        self._validate_mounting_types()
+
+    def _validate_mounting_types(self):
+        if "Mounting Type" not in self.full_df.columns: return
+
+        invalid_types = self.full_df[
+            (~self.full_df["Mounting Type"].isin(["SMD", "THT"])) & 
+            (self.full_df["Mounting Type"] != "")
+        ]["Mounting Type"].unique()
+
+        if len(invalid_types) > 0:
+            QMessageBox.warning(self, "Invalid Data Detected", 
+                f"Strict Warning: The 'Mounting Type' column contains invalid values.\n\n"
+                f"Found: {', '.join(invalid_types)}\n\n"
+                "Allowed values are strictly 'SMD' or 'THT'.\n"
+                "Please fix this in the source file or the Summary Report will be inaccurate.")
 
     def _classify_layer(self, val):
         s = str(val).strip().lower()
@@ -164,10 +191,10 @@ class DashboardScreen(QWidget):
         if s in ['t', 'top', 'toplayer', 'top layer', 'front', 'component']: return 'Top'
         return 'Unknown'
 
-    def _group_bom_data(self, df):
+    def _group_bom_data(self, df, calc_total_points=False):
         if df.empty: return df
         
-        fill_cols = ['Part Number', 'Description']
+        fill_cols = ['Part Number', 'Description', 'Points', 'Mounting Type']
         for c in fill_cols:
             if c in df.columns: df[c] = df[c].fillna('')
 
@@ -189,6 +216,17 @@ class DashboardScreen(QWidget):
 
         if 'Location' in grouped.columns:
             grouped['Quantity'] = grouped['Location'].apply(lambda x: len(str(x).split(',')))
+            
+        if calc_total_points and 'Points' in grouped.columns:
+            grouped['Total Points'] = 0
+            def calc_pts(row):
+                try:
+                    p = float(str(row['Points']).strip())
+                    q = float(row['Quantity'])
+                    return int(p * q)
+                except:
+                    return 0 
+            grouped['Total Points'] = grouped.apply(calc_pts, axis=1)
         
         return grouped
 
@@ -197,27 +235,31 @@ class DashboardScreen(QWidget):
         df_top_all = df[df['Layer_Classified'] == 'Top'].copy()
         df_bot_all = df[df['Layer_Classified'] == 'Bottom'].copy()
 
-        # 1. Internal BOM
+        # 1. Internal BOM [UPDATED ORDER]
         df_internal = df[df['Status'] != 'XY_ONLY'].copy()
-        df_int_grp = self._group_bom_data(df_internal)
-        self._fill_table("Internal BOM", df_int_grp, ['Part Number', 'Description', 'Location', 'Quantity'])
+        df_int_grp = self._group_bom_data(df_internal, calc_total_points=True)
+        # Part Number, Description, Location, Quantity, Mounting Type, Points
+        cols_int = ['Sl No.', 'Part Number', 'Description', 'Location', 'Quantity', 'Mounting Type', 'Points']
+        self._fill_table("Internal BOM", df_int_grp, cols_int, add_sl=True)
 
         # 2. XY Data
         df_xy = df[df['Status'] != 'BOM_ONLY'].copy()
         disp_xy = df_xy.rename(columns={'Ref Des': 'Location', 'Ref X': 'X', 'Ref Y': 'Y'})
         self._fill_table("XY Data", disp_xy, ['X', 'Y', 'Location', 'Rotation', 'Layer'])
 
-        # 3. BOM Top
+        # 3. BOM Top [UPDATED ORDER]
         df_btop = df_top_all[df_top_all['Status'] != 'XY_ONLY'].copy()
-        df_btop_grp = self._group_bom_data(df_btop)
+        df_btop_grp = self._group_bom_data(df_btop, calc_total_points=True)
         df_btop_grp['Layer'] = "TopLayer"
-        self._fill_table("BOM Top", df_btop_grp, ['Sl No.', 'Part Number', 'Description', 'Location', 'Quantity', 'Layer'], add_sl=True)
+        # Part Number, Description, Location, Quantity, Mounting Type, Points, Total Points
+        cols_final = ['Sl No.', 'Part Number', 'Description', 'Location', 'Quantity', 'Mounting Type', 'Points', 'Total Points', 'Layer']
+        self._fill_table("BOM Top", df_btop_grp, cols_final, add_sl=True)
 
-        # 4. BOM Bottom
+        # 4. BOM Bottom [UPDATED ORDER]
         df_bbot = df_bot_all[df_bot_all['Status'] != 'XY_ONLY'].copy()
-        df_bbot_grp = self._group_bom_data(df_bbot)
+        df_bbot_grp = self._group_bom_data(df_bbot, calc_total_points=True)
         df_bbot_grp['Layer'] = "BottomLayer"
-        self._fill_table("BOM Bottom", df_bbot_grp, ['Sl No.', 'Part Number', 'Description', 'Location', 'Quantity', 'Layer'], add_sl=True)
+        self._fill_table("BOM Bottom", df_bbot_grp, cols_final, add_sl=True)
 
         # 5. XY Top
         df_xyt = df_top_all[df_top_all['Status'] != 'BOM_ONLY'].copy()
@@ -231,7 +273,10 @@ class DashboardScreen(QWidget):
         disp_xyb = df_xyb.rename(columns={'Ref Des': 'Location', 'Ref X': 'X', 'Ref Y': 'Y'})
         self._fill_table("XY Bottom", disp_xyb, ['Sl No.', 'Part Number', 'Location', 'X', 'Y', 'Rotation', 'Description', 'Layer'], add_sl=True)
 
-        # 7. Exceptions (Added Remarks)
+        # 7. Summary
+        self._populate_summary(df)
+
+        # 8. Exceptions
         mask_error = (df['Status'] != 'MATCHED') & (df['Is Ignored'] == False)
         df_errors = df[mask_error].copy()
         df_errors['Issue Type'] = "Unknown Error"
@@ -241,8 +286,27 @@ class DashboardScreen(QWidget):
         if 'Ref Des' in df_errors.columns:
             df_errors.rename(columns={'Ref Des': 'Location'}, inplace=True)
 
-        # Added 'Remarks' to the end of the list
         self._fill_table("Exceptions", df_errors, ['Location', 'Issue Type', 'Part Number', 'Layer', 'Description', 'Remarks'])
+
+    def _populate_summary(self, df):
+        valid_mask = df['Status'] != 'XY_ONLY'
+        df_clean = df[valid_mask].copy()
+
+        summary_data = []
+        for layer in ["Top", "Bottom"]:
+            layer_mask = df_clean['Layer_Classified'] == layer
+            df_layer = df_clean[layer_mask]
+            
+            smd_count = len(df_layer[df_layer['Mounting Type'] == 'SMD'])
+            tht_count = len(df_layer[df_layer['Mounting Type'] == 'THT'])
+            
+            summary_data.append({"Scope": f"{layer} BOM", "Type": "SMD", "Count": smd_count})
+            summary_data.append({"Scope": f"{layer} BOM", "Type": "THT", "Count": tht_count})
+            summary_data.append({"Scope": f"{layer} BOM", "Type": "TOTAL", "Count": smd_count + tht_count})
+            summary_data.append({"Scope": "", "Type": "", "Count": ""})
+
+        df_summ = pd.DataFrame(summary_data)
+        self._fill_table("Summary", df_summ, ["Scope", "Type", "Count"])
 
     def _fill_table(self, key, df, columns, add_sl=False):
         table = self.tables[key]
@@ -271,9 +335,31 @@ class DashboardScreen(QWidget):
             for c_idx, col in enumerate(columns):
                 val = str(row[col]) if pd.notna(row[col]) else ""
                 item = QTableWidgetItem(val)
+                
+                if col in ["Sl No.", "Quantity", "Points", "Total Points", "Count", "Rotation"]:
+                    item.setTextAlignment(Qt.AlignCenter)
+                else:
+                    item.setTextAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+                
                 table.setItem(r_idx, c_idx, item)
         
-        table.resizeColumnsToContents()
+        # Column Sizing
+        header = table.horizontalHeader()
+        
+        if key in ["Internal BOM", "BOM Top", "BOM Bottom"]:
+            for i, col in enumerate(columns):
+                if col in ["Sl No.", "Quantity", "Points", "Total Points"]:
+                    header.setSectionResizeMode(i, QHeaderView.Fixed)
+                    table.setColumnWidth(i, 80)
+                elif col == "Description":
+                    header.setSectionResizeMode(i, QHeaderView.Stretch)
+                else:
+                    header.setSectionResizeMode(i, QHeaderView.ResizeToContents)
+        
+        else:
+            for i in range(len(columns)):
+                header.setSectionResizeMode(i, QHeaderView.Stretch)
+                
         table.blockSignals(False)
 
     def handle_exception_edit(self, item):
@@ -286,7 +372,6 @@ class DashboardScreen(QWidget):
         table = self.tables["Exceptions"]
         col_name = table.horizontalHeaderItem(col).text()
         
-        # Mapping Display Header -> Logic Engine Column
         if col_name == "Location": df_col = "Ref Des"
         else: df_col = col_name
 
@@ -298,7 +383,6 @@ class DashboardScreen(QWidget):
 
         idx = self.full_df.index[self.full_df["_id"] == record_id].tolist()
         if idx:
-            # Check if column exists, if not create it (e.g. Remarks)
             if df_col not in self.full_df.columns:
                 self.full_df[df_col] = ""
             self.full_df.at[idx[0], df_col] = new_val

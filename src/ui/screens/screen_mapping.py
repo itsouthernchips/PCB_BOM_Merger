@@ -8,7 +8,6 @@ class MappingScreen(QWidget):
 
     def __init__(self):
         super().__init__()
-        # mapping_widgets stores: (combo_box, status_label, source_type)
         self.mapping_widgets = {} 
         self.bom_columns = []
         self.xy_columns = []
@@ -41,20 +40,16 @@ class MappingScreen(QWidget):
         sync_layout = QGridLayout()
         sync_layout.setVerticalSpacing(15)
         
-        # Row 1: Headers
         sync_layout.addWidget(QLabel("Target Field"), 0, 0)
         sync_layout.addWidget(QLabel("Source File"), 0, 1)
         sync_layout.addWidget(QLabel("Select Column"), 0, 2)
         sync_layout.addWidget(QLabel("Status"), 0, 3)
 
-        # BOM Location
         self._add_row(sync_layout, 1, "BOM Location Col", "BOM", is_critical=True)
-        # XY Location
         self._add_row(sync_layout, 2, "XY Location Col", "XY", is_critical=True)
         
         sync_group.setLayout(sync_layout)
         layout.addWidget(sync_group)
-
 
         # ==========================================
         # SECTION 2: DATA FIELDS
@@ -82,6 +77,9 @@ class MappingScreen(QWidget):
         self._add_row(right_grid, 1, "Part No.", "BOM")
         self._add_row(right_grid, 2, "Description", "BOM")
         self._add_row(right_grid, 3, "Quantity", "BOM")
+        # [UPDATED] Added new fields
+        self._add_row(right_grid, 4, "Points", "BOM")
+        self._add_row(right_grid, 5, "Mounting Type", "BOM")
         
         right_widget.setLayout(right_grid)
 
@@ -131,7 +129,6 @@ class MappingScreen(QWidget):
         status_lbl = QLabel("")
         status_lbl.setFixedWidth(30)
         
-        # Connect change event
         combo.currentIndexChanged.connect(lambda: self._update_status(combo, status_lbl))
 
         grid.addWidget(lbl, row_idx, 0)
@@ -149,9 +146,6 @@ class MappingScreen(QWidget):
             label.setText("❌")
 
     def populate_dropdowns(self, bom_cols, xy_cols):
-        """
-        Fills the dropdowns with the column names from the files.
-        """
         self.bom_columns = bom_cols
         self.xy_columns = xy_cols
 
@@ -163,15 +157,11 @@ class MappingScreen(QWidget):
             choices = self.bom_columns if source == "BOM" else self.xy_columns
             combo.addItems(choices)
             
-            # Default auto-select (imperfect, strict match)
-            # We mostly rely on load_mapping for the smart stuff now.
             self._auto_select(combo, field, choices)
-            
             self._update_status(combo, status_lbl)
             combo.blockSignals(False)
 
     def _auto_select(self, combo, target_field, choices):
-        # Basic auto-select for manual flow
         t_clean = target_field.lower().replace("-", "").replace(".", "").replace(" ", "")
         if "location" in t_clean: t_clean = "designator"
 
@@ -182,15 +172,9 @@ class MappingScreen(QWidget):
                 return
 
     def load_mapping(self, mapping_dict):
-        """
-        [NEW] Sets the dropdowns programmatically based on a dictionary.
-        This is called by the Auto-Skip logic so the UI matches the decision.
-        """
         for field, (combo, status_lbl, source) in self.mapping_widgets.items():
             if field in mapping_dict:
                 target_value = mapping_dict[field]
-                
-                # Find the index of this value in the dropdown
                 index = combo.findText(target_value)
                 if index >= 0:
                     combo.setCurrentIndex(index)

@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QStackedWidget, 
                              QMessageBox, QFileDialog, QAction, QMenuBar)
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QSettings, QStandardPaths
 from PyQt5.QtGui import QIcon
 import os
 import sys
@@ -12,34 +12,28 @@ from src.ui.screens.screen_dashboard import DashboardScreen
 from src.core.excel_writer import generate_production_files
 from src.core.logic_engine import perform_merge_v2
 
-# --- [CRITICAL FIX] ASSET PATH HELPER ---
+# --- RESOURCE HELPER ---
 def resource_path(relative_path):
-    """ Get absolute path to resource, works for dev and for PyInstaller """
     if hasattr(sys, '_MEIPASS'):
-        # PyInstaller --onefile temp folder
         return os.path.join(sys._MEIPASS, relative_path)
-    
-    # PyInstaller --onedir OR Normal Python execution
     return os.path.join(os.path.abspath("."), relative_path)
-# ----------------------------------------
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("BOM Segregator")
+        self.setWindowTitle("BOM Segregator V2")
         self.resize(1000, 700) 
         
-        # --- [UPDATED] LOAD ICON SAFELY ---
-        # Use the helper to find the icon wherever the app is installed
-        icon_path = resource_path(os.path.join("assets", "logo.ico"))
+        # --- SETTINGS INIT ---
+        # This allows us to save/load folder paths across sessions
+        self.settings = QSettings("SCCPL", "BOM_Segregator_V2")
         
-        # If .ico doesn't exist, try .png
+        # Load Icon
+        icon_path = resource_path(os.path.join("assets", "logo.ico"))
         if not os.path.exists(icon_path):
              icon_path = resource_path(os.path.join("assets", "logo.png"))
-             
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
-        # ----------------------------------
         
         # --- MENU BAR ---
         self.create_menu_bar()
@@ -72,20 +66,34 @@ class MainWindow(QMainWindow):
 
     def create_menu_bar(self):
         menubar = self.menuBar()
-        file_menu = menubar.addMenu('Menu')
         
-        reset_action = QAction('Reset (New Project)', self)
+        # -- FILE MENU --
+        file_menu = menubar.addMenu('File')
+        
+        reset_action = QAction('Reset Project (Ctrl+N)', self)
         reset_action.setShortcut('Ctrl+N')
         reset_action.triggered.connect(self.reset_app)
         file_menu.addAction(reset_action)
         
         file_menu.addSeparator()
         
-        exit_action = QAction('Exit', self)
+        exit_action = QAction('Exit (Ctrl+Q)', self)
         exit_action.setShortcut('Ctrl+Q')
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
         
+        # -- SETTINGS MENU [NEW] --
+        settings_menu = menubar.addMenu('Settings')
+        
+        set_up_action = QAction('Set Default Upload Folder...', self)
+        set_up_action.triggered.connect(self.set_upload_folder)
+        settings_menu.addAction(set_up_action)
+        
+        set_dl_action = QAction('Set Default Download Folder...', self)
+        set_dl_action.triggered.connect(self.set_download_folder)
+        settings_menu.addAction(set_dl_action)
+
+        # Style
         menubar.setStyleSheet("""
             QMenuBar { background-color: white; color: #2c3e50; }
             QMenuBar::item:selected { background-color: #BDD7EE; color: #2c3e50; }
@@ -93,6 +101,25 @@ class MainWindow(QMainWindow):
             QMenu::item:selected { background-color: #BDD7EE; }
         """)
 
+    # --- SETTINGS LOGIC ---
+    def _get_default_documents(self):
+        return QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+
+    def set_upload_folder(self):
+        current = self.settings.value("upload_dir", self._get_default_documents())
+        folder = QFileDialog.getExistingDirectory(self, "Select Default Upload Folder", current)
+        if folder:
+            self.settings.setValue("upload_dir", folder)
+            QMessageBox.information(self, "Settings Saved", f"Default Upload Folder set to:\n{folder}")
+
+    def set_download_folder(self):
+        current = self.settings.value("download_dir", self._get_default_documents())
+        folder = QFileDialog.getExistingDirectory(self, "Select Default Download Folder", current)
+        if folder:
+            self.settings.setValue("download_dir", folder)
+            QMessageBox.information(self, "Settings Saved", f"Default Download Folder set to:\n{folder}")
+
+    # --- APP LOGIC ---
     def reset_app(self):
         on_later_screen = self.stack.currentIndex() > 0
         has_files_loaded = (self.screen_import.bom_df is not None) or (self.screen_import.xy_df is not None)
@@ -131,7 +158,12 @@ class MainWindow(QMainWindow):
 
     def perform_final_export(self, df):
         options = QFileDialog.Options()
-        file_path, _ = QFileDialog.getSaveFileName(self, "Save Output", "Production_Output.xlsx", "Excel Files (*.xlsx)", options=options)
+        
+        # [UPDATED] Use the Saved Download Directory
+        default_dir = self.settings.value("download_dir", self._get_default_documents())
+        default_path = os.path.join(default_dir, "Production_Output.xlsx")
+        
+        file_path, _ = QFileDialog.getSaveFileName(self, "Save Output", default_path, "Excel Files (*.xlsx)", options=options)
         if not file_path: return
         if not file_path.lower().endswith('.xlsx'): file_path += '.xlsx'
 

@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLabel, QFileDialog, QFrame, QMessageBox, QGraphicsDropShadowEffect)
-from PyQt5.QtCore import pyqtSignal, Qt, QMimeData
+from PyQt5.QtCore import pyqtSignal, Qt, QMimeData, QSettings, QStandardPaths
 import pandas as pd
 import os
 import re
@@ -104,6 +104,8 @@ class ImportScreen(QWidget):
         super().__init__()
         self.bom_df = None
         self.xy_df = None
+        # [UPDATED] Settings for paths
+        self.settings = QSettings("SCCPL", "BOM_Segregator_V2")
         self.init_ui()
 
     def init_ui(self):
@@ -211,12 +213,18 @@ class ImportScreen(QWidget):
         self.setLayout(layout)
 
     # --- LOGIC ---
+    def _get_default_docs(self):
+        return QStandardPaths.writableLocation(QStandardPaths.DocumentsLocation)
+
     def load_bom_dialog(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Open BOM", "", "Data Files (*.csv *.xlsx *.xls *.txt)")
+        # [UPDATED] Use Settings
+        default_dir = self.settings.value("upload_dir", self._get_default_docs())
+        path, _ = QFileDialog.getOpenFileName(self, "Open BOM", default_dir, "Data Files (*.csv *.xlsx *.xls *.txt)")
         if path: self.process_bom_file(path)
 
     def load_xy_dialog(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Open XY", "", "Data Files (*.csv *.xlsx *.xls *.txt)")
+        default_dir = self.settings.value("upload_dir", self._get_default_docs())
+        path, _ = QFileDialog.getOpenFileName(self, "Open XY", default_dir, "Data Files (*.csv *.xlsx *.xls *.txt)")
         if path: self.process_xy_file(path)
 
     def process_bom_file(self, path):
@@ -249,14 +257,22 @@ class ImportScreen(QWidget):
 
     # --- EXCEL TEMPLATE GENERATION ---
     def download_bom_template(self):
-        headers = ["Part.No.", "Description", "Location", "Quantity"]
-        widths = [20, 40, 30, 15] # Matches the visual proportion in your screenshot
-        self._generate_excel_template("BOM_Template.xlsx", headers, widths)
+        # [UPDATED] Reordered: Mounting Type before Points
+        headers = ["Part.No.", "Description", "Location", "Quantity", "Mounting Type", "Points"]
+        widths = [20, 35, 30, 10, 15, 10] 
+        
+        # [UPDATED] Use Settings
+        default_dir = self.settings.value("download_dir", self._get_default_docs())
+        default_path = os.path.join(default_dir, "BOM_Template.xlsx")
+        self._generate_excel_template(default_path, headers, widths)
 
     def download_xy_template(self):
-        headers = ["Center-X", "Center-Y", "Location", "Rotation", "Layer"]
-        widths = [15, 15, 20, 15, 15]
-        self._generate_excel_template("XY_Template.xlsx", headers, widths)
+        headers = ["Location", "Center-X", "Center-Y", "Rotation", "Layer"]
+        widths = [20, 15, 15, 15, 15]
+        
+        default_dir = self.settings.value("download_dir", self._get_default_docs())
+        default_path = os.path.join(default_dir, "XY_Template.xlsx")
+        self._generate_excel_template(default_path, headers, widths)
 
     def _generate_excel_template(self, default_name, headers, widths):
         path, _ = QFileDialog.getSaveFileName(self, "Save Template", default_name, "Excel Files (*.xlsx)")
@@ -264,17 +280,14 @@ class ImportScreen(QWidget):
             return
 
         try:
-            # Create a Pandas Excel Writer using XlsxWriter as the engine
             writer = pd.ExcelWriter(path, engine='xlsxwriter')
             workbook = writer.book
             
-            # Create a dummy dataframe just for headers
             df = pd.DataFrame(columns=headers)
             df.to_excel(writer, sheet_name='Sheet1', index=False, startrow=0)
             
             worksheet = writer.sheets['Sheet1']
             
-            # Add Header Format (Blue Background #BDD7EE, Bold, Border)
             header_fmt = workbook.add_format({
                 'bold': True,
                 'bg_color': '#BDD7EE',
@@ -283,7 +296,6 @@ class ImportScreen(QWidget):
                 'valign': 'vcenter'
             })
             
-            # Apply format and width
             for i, (col_name, width) in enumerate(zip(headers, widths)):
                 worksheet.write(0, i, col_name, header_fmt)
                 worksheet.set_column(i, i, width)
@@ -306,10 +318,13 @@ class ImportScreen(QWidget):
         xy_map  = {clean_header(c): c for c in self.xy_df.columns}
 
         reqs = {
-            "Part No.":    (["partno", "partnumber", "part"], bom_map),
+            "Part No.":    (["partno", "partnumber", "part", "component"], bom_map),
             "Description": (["description", "desc", "value", "comment"], bom_map),
             "Quantity":    (["quantity", "qty"], bom_map),
             "BOM Location Col":(["location", "designator", "refdes", "ref", "reference"], bom_map),
+            "Points": (["points", "pins", "leads", "pads", "solderpoints"], bom_map),
+            "Mounting Type": (["mountingtype", "mount", "type", "tech", "technology", "package"], bom_map),
+
             "Center-X":    (["centerx", "midx", "refx", "x", "xmm", "xmil"], xy_map),
             "Center-Y":    (["centery", "midy", "refy", "y", "ymm", "ymil"], xy_map),
             "Rotation":    (["rotation", "rot", "angle"], xy_map),
