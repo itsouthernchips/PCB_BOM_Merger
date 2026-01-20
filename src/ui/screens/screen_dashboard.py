@@ -194,6 +194,7 @@ class DashboardScreen(QWidget):
     def _group_bom_data(self, df, calc_total_points=False):
         if df.empty: return df
         
+        df = df.copy()  # Ensure we work with a copy, not a view
         fill_cols = ['Part Number', 'Description', 'Points', 'Mounting Type']
         for c in fill_cols:
             if c in df.columns: df[c] = df[c].fillna('')
@@ -293,20 +294,56 @@ class DashboardScreen(QWidget):
         df_clean = df[valid_mask].copy()
 
         summary_data = []
-        for layer in ["Top", "Bottom"]:
-            layer_mask = df_clean['Layer_Classified'] == layer
-            df_layer = df_clean[layer_mask]
+        for mount_type in ["SMD", "THT"]:
+            type_mask = df_clean['Mounting Type'] == mount_type
+            df_type = df_clean[type_mask]
             
-            smd_count = len(df_layer[df_layer['Mounting Type'] == 'SMD'])
-            tht_count = len(df_layer[df_layer['Mounting Type'] == 'THT'])
+            # Top Layer - Group by Part Number
+            df_top = df_type[df_type['Layer_Classified'] == 'Top']
+            df_top_grouped = self._group_bom_data(df_top, calc_total_points=True)
+            top_line_items = len(df_top_grouped)
+            top_qty = pd.to_numeric(df_top_grouped['Quantity'], errors='coerce').fillna(0).sum()
+            top_points = pd.to_numeric(df_top_grouped['Total Points'], errors='coerce').fillna(0).sum()
             
-            summary_data.append({"Scope": f"{layer} BOM", "Type": "SMD", "Count": smd_count})
-            summary_data.append({"Scope": f"{layer} BOM", "Type": "THT", "Count": tht_count})
-            summary_data.append({"Scope": f"{layer} BOM", "Type": "TOTAL", "Count": smd_count + tht_count})
-            summary_data.append({"Scope": "", "Type": "", "Count": ""})
+            # Bottom Layer - Group by Part Number
+            df_bottom = df_type[df_type['Layer_Classified'] == 'Bottom']
+            df_bottom_grouped = self._group_bom_data(df_bottom, calc_total_points=True)
+            bot_line_items = len(df_bottom_grouped)
+            bot_qty = pd.to_numeric(df_bottom_grouped['Quantity'], errors='coerce').fillna(0).sum()
+            bot_points = pd.to_numeric(df_bottom_grouped['Total Points'], errors='coerce').fillna(0).sum()
+            
+            # Totals
+            total_line_items = top_line_items + bot_line_items
+            total_qty = top_qty + bot_qty
+            total_points = top_points + bot_points
+            
+            summary_data.append({
+                "Type": f"{mount_type} - Top",
+                "Line Items": top_line_items,
+                "Components": int(top_qty),
+                "Total Points": int(top_points)
+            })
+            summary_data.append({
+                "Type": f"{mount_type} - Bottom",
+                "Line Items": bot_line_items,
+                "Components": int(bot_qty),
+                "Total Points": int(bot_points)
+            })
+            summary_data.append({
+                "Type": "TOTAL",
+                "Line Items": total_line_items,
+                "Components": int(total_qty),
+                "Total Points": int(total_points)
+            })
+            summary_data.append({
+                "Type": "",
+                "Line Items": "",
+                "Components": "",
+                "Total Points": ""
+            })
 
         df_summ = pd.DataFrame(summary_data)
-        self._fill_table("Summary", df_summ, ["Scope", "Type", "Count"])
+        self._fill_table("Summary", df_summ, ["Type", "Line Items", "Components", "Total Points"])
 
     def _fill_table(self, key, df, columns, add_sl=False):
         table = self.tables[key]

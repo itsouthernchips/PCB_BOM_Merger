@@ -27,9 +27,9 @@ def perform_merge_v2(bom_df, xy_df, mapping):
     if rot_col and rot_col in xy_df.columns:
         xy_df[rot_col] = _clean_numeric_col(xy_df[rot_col])
 
-    # --- 3. PRE-PROCESS XY ---
-    print("Resolving Panels...")
-    xy_clean = _resolve_panels_v2(xy_df, xy_ref_col, ref_y_col)
+    # --- 3. PREPARE XY DATA ---
+    # XY data has no duplicate references, use as-is
+    xy_clean = xy_df.copy()
 
     # --- 4. PRE-PROCESS BOM ---
     print(f"Normalizing BOM...")
@@ -111,12 +111,3 @@ def _clean_numeric_col(series):
     return series.astype(str).apply(
         lambda x: re.sub(r"[^\d\.\-]", "", x) if pd.notnull(x) else x
     )
-
-def _resolve_panels_v2(xy_df, ref_col_name, y_col_name):
-    if not y_col_name or y_col_name not in xy_df.columns:
-        return xy_df
-    temp_y = "__TEMP_Y"
-    xy_df[temp_y] = pd.to_numeric(xy_df[y_col_name], errors='coerce')
-    xy_sorted = xy_df.sort_values(by=temp_y, ascending=True)
-    xy_deduped = xy_sorted.drop_duplicates(subset=ref_col_name, keep='first')
-    return xy_deduped.drop(columns=[temp_y])
